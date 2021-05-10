@@ -34,14 +34,14 @@ DWORD CreateProc(LPCTSTR appName, HANDLE & hProc, HANDLE & hThread) {
 	return ERROR_SUCCESS;
 }
 
-DWORD LoopEntry(HANDLE hProc, HANDLE hThread, ULONG_PTR& addressOfEntry, DWORD& originalEntry) {
+DWORD LoopEntry(HANDLE hProc, HANDLE hThread, ULONG_PTR& addressOfEntry, WORD& originalEntry) {
 	PROCESS_BASIC_INFORMATION pbi = {};
 	ULONG retLen = 0;
 	PEB peb = {};
 	IMAGE_DOS_HEADER dos = {};
 	IMAGE_NT_HEADERS32 nt = {};
 
-	DWORD patchedEntry = 0xFEE8;
+	WORD patchedEntry = 0xFEEB;
 
 	NTSTATUS qStatus = NtQueryInformationProcess(
 		hProc,
@@ -57,15 +57,17 @@ DWORD LoopEntry(HANDLE hProc, HANDLE hThread, ULONG_PTR& addressOfEntry, DWORD& 
 		return qStatus;
 	}
 
-	ULONG_PTR pRemoteBaseAddress = (ULONG_PTR) peb.Reserved3[1];
+	DWORD error = ReadRemote<PEB>(hProc, (ULONG_PTR)pbi.PebBaseAddress, peb);
+
+	ULONG_PTR pRemoteBaseAddress = (ULONG_PTR)peb.Reserved3[1];
 
 	ReadRemote<IMAGE_DOS_HEADER>(hProc, pRemoteBaseAddress, dos);
-	ReadRemote<IMAGE_NT_HEADERS32>(hProc, (ULONG_PTR) (pRemoteBaseAddress + dos.e_lfanew), nt);
+	ReadRemote<IMAGE_NT_HEADERS32>(hProc, (ULONG_PTR)(pRemoteBaseAddress + dos.e_lfanew), nt);
 
 	addressOfEntry = pRemoteBaseAddress + nt.OptionalHeader.AddressOfEntryPoint;
 
-	ReadRemote<DWORD>(hProc, (ULONG_PTR)pbi.PebBaseAddress, originalEntry);
-	WriteRemote<DWORD>(hProc, (ULONG_PTR)pbi.PebBaseAddress, patchedEntry);
+	ReadRemote<WORD>(hProc, addressOfEntry, originalEntry);
+	WriteRemote<WORD>(hProc, addressOfEntry, patchedEntry);
 
 	ResumeThread(hThread);
 
@@ -237,7 +239,7 @@ int main() {
 	DWORD status = ERROR_SUCCESS;
 
 	ULONG_PTR addressOfEntry = 0;
-	DWORD originalEntry = 0;
+	WORD originalEntry = 0;
 	ULONG_PTR loadDirAddr = 0;
 
 	// create suspended process
